@@ -1,0 +1,158 @@
+HyPeRleDgeR faBriC v1.1 환경구축 (Kafka Cluster + CA Server 2ea <Org1 Ca> <Org2 Ca>)
+
+mkdir $HOME/e2e_cli
+cd $HOME/e2e_cli
+mkdir base channel-artifacts
+mkdir ../chaincode
+cp -r $GOPATH/src/github.com/hyperledger/fabric/examples/chaincode/go ../chaincode
+
+cd $HOME/e2e_cli
+cp $GOPATH/src/github.com/hyperledger/fabric/examples/e2e_cli/crypto-config.yaml .
+
+cd $HOME/e2e_cli
+cp $GOPATH/src/github.com/hyperledger/fabric/examples/e2e_cli/configtx.yaml .
+
+cd $HOME/e2e_cli
+cp $GOPATH/src/github.com/hyperledger/fabric/examples/e2e_cli/docker-compose-cli.yaml .
+
+cd $HOME/e2e_cli
+cp $GOPATH/src/github.com/hyperledger/fabric/examples/e2e_cli/docker-compose-couch.yaml .
+
+cp -r $GOPATH/src/github.com/hyperledger/fabric/examples/e2e_cli/base .
+
+
+cryptogen 툴 컴파일 및 사용
+cd $HOME/e2e_cli
+$GOPATH/src/github.com/hyperledger/fabric/release/linux-amd64/bin/cryptogen generate --config=./crypto-config.yaml
+
+
+configtxgen 툴 컴파일 및 사용
+FABRIC_CFG_PATH=$PWD
+$GOPATH/src/github.com/hyperledger/fabric/release/linux-amd64/bin/configtxgen -profile TwoOrgsOrdererGenesis \
+-outputBlock ./channel-artifacts/genesis.block
+
+$GOPATH/src/github.com/hyperledger/fabric/release/linux-amd64/bin/configtxgen -profile TwoOrgsChannel -outputCreateChannelTx ./channel-artifacts/channel.tx -channelID jsworld
+
+$GOPATH/src/github.com/hyperledger/fabric/release/linux-amd64/bin/configtxgen -profile TwoOrgsChannel -outputAnchorPeersUpdate ./channel-artifacts/Org1MSPanchors.tx -channelID jsworld -asOrg Org1MSP
+
+$GOPATH/src/github.com/hyperledger/fabric/release/linux-amd64/bin/configtxgen -profile TwoOrgsChannel -outputAnchorPeersUpdate ./channel-artifacts/Org2MSPanchors.tx -channelID jsworld -asOrg Org2MSP
+
+
+★수정사항 ★★★★★★★★★★★★★★★★★★★★★★★
+
+-docker-compose-cli.yaml 수정사항
+
+services: //서비스 아래부분에 붙여 넣기
+  ca.example.com:
+    image: hyperledger/fabric-ca
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=ca.example.com
+#      - FABRIC_CA_SERVER_CA_CERTFILE=/etc/hyperledger/fabric-ca-server-config/ca.org1.example.com-cert.pem
+#      - FABRIC_CA_SERVER_CA_KEYFILE=/etc/hyperledger/fabric-ca-server-config/4239aa0dcd76daeeb8ba0cda701851d14504d31aad1b2ddddbac6a57365e497c_sk
+    ports:
+      - "7054:7054"
+    command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
+    volumes:
+      - ./crypto-config/peerOrganizations/org1.example.com/ca/:/etc/hyperledger/fabric-ca-server-config
+    container_name: ca.example.com
+
+  ca2.example.com:
+    image: hyperledger/fabric-ca
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=ca2.example.com
+#      - FABRIC_CA_SERVER_CA_CERTFILE=/etc/hyperledger/fabric-ca-server-config/ca.org2.example.com-cert.pem
+#      - FABRIC_CA_SERVER_CA_KEYFILE=/etc/hyperledger/fabric-ca-server-config/4239aa0dcd76daeeb8ba0cda701851d14504d31aad1b2ddddbac6a57365e497c_sk
+    ports:
+      - "7055:7054"
+    command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
+    volumes:
+      - ./crypto-config/peerOrganizations/org2.example.com/ca/:/etc/hyperledger/fabric-ca-server-config
+    container_name: ca2.example.com
+
+위의 코드 추가후 주석을 제거한담에 개인키파일명을 갱신해준다.
+TLS부분을 전부 false로 바꿔준다
+
+-base/docker-compose-base.yaml 수정사항
+피어 서비스에 CORE_PEER_MSPCONFIGPATH를 추가해준다.
+TLS부분을 전부 false로 바꿔준다.
+
+-base/peer-base.yaml 수정사항
+TLS부분을 전부 false로 바꿔준다
+
+
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+
+
+
+#docker-compose-cli.yaml 파일 수정
+57번쨰줄 command부분을 주석처리 주석은 # //command 아래쪽에 붙은 부분 주석화
+
+CHANNEL_NAME=jsworld TIMEOUT=100 docker-compose -f docker-compose-cli.yaml up -d
+
+docker exec -it cli bash
+
+##Peer0.org1설정
+
+peer channel fetch 0 -o orderer.example.com:7050 -c "testchainid" >&log.txt
+
+peer channel create -o orderer.example.com:7050 -c jsworld -f ./channel-artifacts/channel.tx
+
+Peer0.org1 //아래 환경 변수 입력
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/users/Admin\@org1.example.com/msp
+CORE_PEER_ADDRESS=peer0.org1.example.com:7051
+CORE_PEER_LOCALMSPID="Org1MSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+
+peer channel join -b jsworld.block
+
+Peer1.org1 //아래 환경 변수 입력
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/users/Admin\@org1.example.com/msp
+CORE_PEER_ADDRESS=peer1.org1.example.com:7051
+CORE_PEER_LOCALMSPID="Org1MSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.example.com/peers/peer1.org1.example.com/tls/ca.crt
+
+peer channel join -b jsworld.block
+
+Peer0.org2 //아래 환경 변수 입력
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.example.com/users/Admin\@org2.example.com/msp
+CORE_PEER_ADDRESS=peer0.org2.example.com:7051
+CORE_PEER_LOCALMSPID="Org2MSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
+
+peer channel join -b jsworld.block
+
+Peer1.org2 //아래 환경 변수 입력
+CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.example.com/users/Admin\@org2.example.com/msp
+CORE_PEER_ADDRESS=peer1.org2.example.com:7051
+CORE_PEER_LOCALMSPID="Org2MSP"
+CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.example.com/peers/peer1.org2.example.com/tls/ca.crt
+
+peer channel join -b jsworld.block
+
+#peer 01 환경변수 설정후
+peer channel create -o orderer.example.com:7050 -c jsworld -f ./channel-artifacts/Org1MSPanchors.tx
+
+#peer 02 환경변수 설정후
+peer channel create -o orderer.example.com:7050 -c jsworld -f ./channel-artifacts/Org2MSPanchors.tx
+
+#체인코드 디플로이
+#peer 01 환경 변수 설정후
+peer chaincode install -n mycc -v 1.0 -p /opt/gopath/src/github.com/hyperledger/fabric/examples/chaincode/go/chaincode_example02
+
+#peer 01 환경 변수 설정후
+peer chaincode instantiate -o orderer.example.com:7050 -C jsworld -n mycc -v 1.0 -c '{"Args":["init","a","100","b","200"]}' -P "OR ('Org1MSP.member','Org2MSP.member')"
+
+peer chaincode query -C jsworld -n mycc -c '{"Args":["query","a"]}' //a값 쿼리하는 명령어
+
+peer chaincode invoke -o orderer.example.com:7050 -C jsworld -n mycc -c '{"Args":["invoke","a","b","10"]}'
+
+#peer 12 환경 변수 설정후
+peer chaincode install -n mycc -v 1.0 -p github.com/hyperledger/fabric/examples/chaincode/go/chaincode_example02
+
+peer chaincode query -C jsworld -n mycc -c '{"Args":["query","a"]}' //a값 쿼리하는 명령어
+
+
+
